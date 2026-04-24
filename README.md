@@ -4,13 +4,13 @@ Pipeline automatisé qui surveille une boîte Gmail, capte les notifications des
 
 **Stack** : n8n (orchestration) · OpenAI gpt-4o avec JSON mode natif (extraction JSON + rédaction HTML) · Supabase PostgreSQL (persistance).
 
-**Test technique Novekai — Développeur IA — Avril 2026.**
+**Test technique — Développeur IA — Avril 2026.**
 
 ---
 
 ## Workflow
 
-[Ouvrir dans n8n](https://n8n-u2h7.n8n.novekai.agency/workflow/3DmtD9kupJm7HqCc) · [Export JSON](./workflow/novek-immo-2.json)
+[Export JSON](./workflow/novek-immo-2.json)
 
 15 nœuds, principalement `Code` + `HTTP Request` côté logique custom, avec un `Gmail Trigger` natif pour le déclenchement. Le workflow appelle directement l'API REST de Supabase (PostgREST), l'API Chat Completions d'OpenAI et l'API Drafts de Gmail plutôt que de passer par les connecteurs natifs — choix volontaire pour garder le contrôle total sur les payloads et démontrer la maîtrise des APIs sous-jacentes. Crée un brouillon Gmail HTML stylé dans le thread d'origine.
 
