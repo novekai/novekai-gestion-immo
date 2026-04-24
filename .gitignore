@@ -1,0 +1,45 @@
+# =============================================================================
+# Critère ÉLIMINATOIRE du test : aucune clé API / credential ne doit fuiter.
+# Ce .gitignore exclut tout ce qui pourrait en contenir.
+# =============================================================================
+
+# -- Variables d'environnement ------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# -- n8n (self-hosted) --------------------------------------------------------
+# Le dossier ~/.n8n contient credentials chiffrés ET base SQLite.
+.n8n/
+n8n_data/
+n8n-data/
+
+# Exports n8n potentiellement avec credentials
+*.credentials.json
+credentials.json
+
+# -- Supabase (CLI local) -----------------------------------------------------
+.branches/
+.temp/
+supabase/.temp/
+
+# -- Node / outils dev --------------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# -- IDE / OS -----------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# -- Logs / divers ------------------------------------------------------------
+*.log
+.cache/
+dist/
+build/

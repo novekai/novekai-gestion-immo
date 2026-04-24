@@ -1,0 +1,55 @@
+{
+  "_comment": "Sortie JSON attendue pour chaque email de test. Tolérance ±0.1 sur score_confiance. Les champs texte (notamment draft_reply) peuvent varier à la marge (reformulation par le LLM). Ces valeurs servent de référence pour vérification manuelle, pas de test automatisé strict.",
+
+  "email-01-immoweb-fr": {
+    "prospect_nom": "Sophie Marchal",
+    "prospect_email": "sophie.marchal@gmail.com",
+    "prospect_tel": "0476 88 21 34",
+    "bien_reference": "IW-2847392",
+    "bien_adresse": "Rue du Pont d'Ile 12, 4000 Liège",
+    "type_demande": "visite",
+    "langue": "fr",
+    "message_prospect": "Bonjour, je suis très intéressée par votre appartement au Pont d'Ile. Je cherche un logement pour moi seule, je suis infirmière en CDI au CHU de Liège depuis 3 ans. Je souhaiterais organiser une visite le plus rapidement possible — disponible samedi 14h-18h ou dimanche 9h-12h. Merci d'avance, Sophie Marchal",
+    "score_confiance": 0.95,
+    "draft_reply": "Bonjour Sophie,\n\nMerci pour votre intérêt pour notre appartement Rue du Pont d'Ile. Je vous propose un créneau samedi à 15h ou dimanche à 10h pour la visite — confirmez-moi celui qui vous convient et je vous envoie l'adresse exacte.\n\nCordialement,\nL'équipe Novekai"
+  },
+
+  "email-02-immoweb-nl": {
+    "prospect_nom": "Thomas De Smedt",
+    "prospect_email": "thomas.desmedt@hotmail.com",
+    "prospect_tel": "0498 33 72 11",
+    "bien_reference": "IW-3912847",
+    "bien_adresse": "Rue des Lilas 8, 4020 Luik (Jupille)",
+    "type_demande": "info",
+    "langue": "nl",
+    "message_prospect": "Dag, ik ben geïnteresseerd in uw woning in Jupille. Enkele vragen : Zijn de kosten (water, gas, elektriciteit) inbegrepen in de huurprijs ? Is er een garage of parkeerplaats beschikbaar ? Zijn huisdieren toegestaan ? Ik heb een kleine hond (jack russel). Wanneer is de woning beschikbaar ? Ik zoek voor 1 juni 2025. Met vriendelijke groeten, Thomas De Smedt",
+    "score_confiance": 0.9,
+    "draft_reply": "Dag Thomas,\n\nBedankt voor uw interesse in onze woning in Jupille. Ik kom zo snel mogelijk terug op uw vragen (kosten, parkeerplaats, huisdieren, beschikbaarheid). Een bezoek kan ook handig zijn om alles ter plaatse te bespreken — laat me weten wanneer het u uitkomt.\n\nMet vriendelijke groeten,\nHet Novekai team"
+  },
+
+  "email-03-immovlan-fr": {
+    "prospect_nom": "Léa Fontaine",
+    "prospect_email": "lea.fontaine.nrm@outlook.com",
+    "prospect_tel": "0462 19 08 55",
+    "bien_reference": "IVL-00291847",
+    "bien_adresse": "Avenue de la Gare 45, 5000 Namur",
+    "type_demande": "candidature",
+    "langue": "fr",
+    "message_prospect": "Bonjour, je suis étudiante en master 2 à l'UNAMUR et cherche un logement pour l'année académique 2025-2026 à partir du 1er septembre. Mon dossier : jobiste 15h/semaine chez Carrefour, parents garants (père fonctionnaire fédéral, revenus nets ~3.200 EUR/mois), pas d'animaux, non-fumeuse. Disponible en semaine après 17h ou le samedi. Cordialement, Léa Fontaine",
+    "score_confiance": 0.95,
+    "draft_reply": "Bonjour Léa,\n\nMerci pour votre candidature très complète pour le studio de la Gare. J'accuse réception de votre dossier et je reviens vers vous sous 48-72h avec une réponse.\n\nCordialement,\nL'équipe Novekai"
+  },
+
+  "email-04-incomplete": {
+    "prospect_nom": null,
+    "prospect_email": null,
+    "prospect_tel": null,
+    "bien_reference": null,
+    "bien_adresse": null,
+    "type_demande": "autre",
+    "langue": "fr",
+    "message_prospect": "Quelqu'un est intéressé par votre bien.",
+    "score_confiance": 0.15,
+    "draft_reply": null
+  }
+}
