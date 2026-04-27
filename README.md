@@ -251,18 +251,20 @@ novekai-immo-test/
 
 ---
 
+## Robustesse / error handling
+
+Tous les nœuds critiques ont un **retry + error output** branché vers la table `processing_log` :
+
+| Nœud | Retry | Error handler |
+|---|---|---|
+| OpenAI Extract | 3 essais, backoff 5s | `Log OpenAI Failure` → `processing_log` |
+| Insert Lead (REST) | 3 essais, backoff 3s | `Log Insert Failure` → `processing_log` |
+| Create Gmail Draft | 2 essais, backoff 5s | `Log Draft Failure` → `processing_log` |
+
+Pour le filet de sécurité ultime, un workflow séparé **`Error Handler — Novek immo`** (ID `DWWTNDsNPYCztTDb`) capte tous les crashes non gérés via un `Error Trigger` et les log dans `processing_log` avec contexte (workflow, nœud, message d'erreur, exec id). À configurer comme Error Workflow de Novek immo2 dans Settings → Error Workflow.
+
+Le `Decide Route` a aussi des **gardes défensives** : si `prospect_email` est null ou si Supabase REST renvoie un statusCode ≥ 400, on route vers `insert` (mieux un doublon potentiel qu'un lead perdu). Le `Filter: Low Confidence` extrait le `lead_id` de manière défensive (`Array.isArray(body) ? body[0].id : body.id`) pour gérer les variations de réponse PostgREST.
+
 ## Limitations connues / améliorations futures
 
-- **Tests automatisés** : aujourd'hui `expected-outputs.json` est une référence pour vérification manuelle. Prochain pas : un script Node qui POSTe les 4 emails à un webhook n8n et compare la sortie avec tolérance (cosinus sur les textes, ±0.1 sur le score).
-- **Rate limiting OpenAI** : à >1000 emails/jour, ajouter un nœud `Split In Batches` avant l'appel OpenAI pour throttler.
-- **Multi-tenant** : la table `leads` n'a pas de colonne `agency_id`. Si plusieurs agences utilisent le pipeline, ajouter cette colonne + des RLS policies par agence.
-- **Pub/Sub Gmail** : pour de la latence sub-seconde, configurer Gmail Pub/Sub vers un webhook n8n (au lieu du polling 60s). Setup Google Cloud + renouvellement `users.watch` toutes les semaines.
-- **Observabilité externe** : exporter les `parse_error` et `score < 0.3` vers Slack/Discord via la variable `ALERT_WEBHOOK_URL` déjà prévue.
-- **Internationalisation** : si Immoweb dessert l'Allemagne, ajouter `de` à l'enum `langue`, étendre le prompt, ajouter une signature DE.
-
----
-
-## Questions
-
-- Sur le test : voir l'énoncé.
-- Sur l'implémentation : lire [`docs/architecture.md`](./docs/architecture.md), puis ouvrir une issue.
+- **Tests automatisés

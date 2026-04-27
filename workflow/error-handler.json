@@ -1,0 +1,57 @@
+{
+  "name": "Error Handler — Novek immo",
+  "_export_note": "Workflow d'erreur global pour Novek immo2. À configurer comme Error Workflow de Novek immo2 dans Settings → Error Workflow. Capte tous les crashes non gérés via Error Trigger et log dans processing_log avec contexte (workflow, nœud, message, exec id).",
+  "nodes": [
+    {
+      "id": "error-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [240, 320],
+      "parameters": {}
+    },
+    {
+      "id": "extract-error",
+      "name": "Extract Error Info",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 320],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "const items = $input.all();\nconst out = [];\nfor (const i of items) {\n  const e = i.json || {};\n  const exec = e.execution || {};\n  const wf = e.workflow || {};\n  const err = exec.error || {};\n  const node = err.node || {};\n  out.push({ json: {\n    workflow_name: wf.name || 'Unknown',\n    workflow_id: wf.id || 'Unknown',\n    execution_id: exec.id || 'Unknown',\n    node_name: node.name || 'Unknown',\n    node_type: node.type || 'Unknown',\n    error_message: err.message || 'No message',\n    error_stack: (err.stack || '').toString().slice(0, 500),\n    timestamp: new Date().toISOString(),\n    execution_url: exec.url || ''\n  }});\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "log-crash",
+      "name": "Log Crash to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [720, 320],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $credentials.host }}/rest/v1/processing_log",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": {
+          "action": "parse_error",
+          "raw_email": "=[CRASH] Workflow {{ $json.workflow_name }} (id={{ $json.workflow_id }}) — Execution {{ $json.execution_id }}",
+          "notes": "=Nœud \"{{ $json.node_name }}\" ({{ $json.node_type }}) — {{ $json.timestamp }} — {{ $json.error_message }}"
+        },
+        "options": { "response": { "response": { "neverError": true } } }
+      },
+      "credentials": {
+        "supabaseApi": { "id": "REPLACE_WITH_YOUR_SUPABASE_CREDENTIAL_ID", "name": "Supabase Novekai" }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": { "main": [[{ "node": "Extract Error Info", "type": "main", "index": 0 }]] },
+    "Extract Error Info": { "main": [[{ "node": "Log Crash to Supabase", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "novekai" }, { "name": "immo" }, { "name": "error-handler" }]
+}

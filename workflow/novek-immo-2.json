@@ -1,6 +1,6 @@
 {
   "name": "Novek immo2",
-  "_export_note": "Pipeline Gmail Trigger + OpenAI gpt-4o + Supabase REST + brouillon Gmail HTML dans le thread d'origine. Credentials vidés pour ce commit. À l'import : créer Gmail OAuth2 (scope gmail.modify), OpenAI httpHeaderAuth (Authorization: Bearer), Supabase API (host + service_role).",
+  "_export_note": "Pipeline Gmail Trigger + OpenAI gpt-4o + Supabase REST + brouillon Gmail HTML dans le thread d'origine. Credentials vidés pour ce commit. À l'import : créer Gmail OAuth2 (scope gmail.modify), OpenAI httpHeaderAuth (Authorization: Bearer), Supabase API (host + service_role). Nœuds critiques (OpenAI Extract, Insert Lead, Create Gmail Draft) ont retry + onError:continueErrorOutput vers des Log X Failure (HTTP POST processing_log). Voir aussi workflow/error-handler.json pour le filet de sécurité global.",
   "nodes": [
     {
       "id": "gmail-trigger",
@@ -38,6 +38,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [720, 320],
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
       "parameters": {
         "method": "POST",
         "url": "https://api.openai.com/v1/chat/completions",
@@ -99,7 +103,7 @@
       "parameters": {
         "mode": "runOnceForAllItems",
         "language": "javaScript",
-        "jsCode": "const items = $input.all();\nconst leads = $('Parse & Validate').all();\nconst out = [];\nfor (let idx = 0; idx < items.length; idx++) {\n  const i = items[idx];\n  const sourceIdx = i.pairedItem?.item ?? idx;\n  const lead = leads[sourceIdx]?.json;\n  if (!lead) continue;\n  const body = i.json.body !== undefined ? i.json.body : i.json;\n  const dupArray = Array.isArray(body) ? body : (body && body.id ? [body] : []);\n  const isDuplicate = dupArray.length > 0 && !!dupArray[0].id;\n  out.push({ json: { ...lead, _action: isDuplicate ? 'log_duplicate' : 'insert', _duplicate_id: isDuplicate ? dupArray[0].id : null } });\n}\nreturn out;"
+        "jsCode": "const items = $input.all();\nconst leads = $('Parse & Validate').all();\nconst out = [];\nfor (let idx = 0; idx < items.length; idx++) {\n  const i = items[idx];\n  const sourceIdx = i.pairedItem?.item ?? idx;\n  const lead = leads[sourceIdx]?.json;\n  if (!lead) continue;\n  // Garde 1 : email prospect manquant -> insert quand même (audit) sans dédup\n  if (!lead.prospect_email) {\n    out.push({ json: { ...lead, _action: 'insert', _duplicate_id: null } });\n    continue;\n  }\n  // Garde 2 : Supabase a renvoyé une erreur HTTP -> en cas de doute on insère\n  const statusCode = i.json.statusCode;\n  if (statusCode && statusCode >= 400) {\n    out.push({ json: { ...lead, _action: 'insert', _duplicate_id: null, _check_dup_status: statusCode } });\n    continue;\n  }\n  const body = i.json.body !== undefined ? i.json.body : i.json;\n  const dupArray = Array.isArray(body) ? body : (body && body.id ? [body] : []);\n  const isDuplicate = dupArray.length > 0 && !!dupArray[0].id;\n  out.push({ json: { ...lead, _action: isDuplicate ? 'log_duplicate' : 'insert', _duplicate_id: isDuplicate ? dupArray[0].id : null } });\n}\nreturn out;"
       }
     },
     {
@@ -120,6 +124,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [1920, 220],
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
       "parameters": {
         "method": "POST",
         "url": "={{ $credentials.host }}/rest/v1/leads",
@@ -158,7 +166,7 @@
       "parameters": {
         "mode": "runOnceForAllItems",
         "language": "javaScript",
-        "jsCode": "return $input.all().filter(i => (i.json.score_confiance ?? 1) < 0.3);"
+        "jsCode": "const items = $input.all();\nreturn items.filter(i => {\n  const body = i.json.body || i.json;\n  const row = Array.isArray(body) ? body[0] : body;\n  return (row?.score_confiance ?? 1) < 0.3;\n}).map(i => {\n  const body = i.json.body || i.json;\n  const row = Array.isArray(body) ? body[0] : body;\n  return { json: { ...i.json, _lead_id: row?.id || null, _score: row?.score_confiance ?? 0, _raw_email: row?.raw_email || '' } };\n});"
       }
     },
     {
@@ -176,9 +184,9 @@
         "contentType": "json",
         "specifyBody": "json",
         "jsonBody": {
-          "lead_id": "={{ $json.id }}",
-          "raw_email": "={{ $json.raw_email }}",
-          "score_confiance": "={{ $json.score_confiance }}"
+          "lead_id": "={{ $json._lead_id }}",
+          "raw_email": "={{ $json._raw_email }}",
+          "score_confiance": "={{ $json._score }}"
         }
       },
       "credentials": {
@@ -215,6 +223,10 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
       "position": [2640, 320],
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000,
       "parameters": {
         "method": "POST",
         "url": "https://gmail.googleapis.com/gmail/v1/users/me/drafts",
@@ -273,29 +285,4 @@
     }
   ],
   "connections": {
-    "Gmail Trigger": { "main": [[{ "node": "Filter & Normalize", "type": "main", "index": 0 }]] },
-    "Filter & Normalize": { "main": [[{ "node": "OpenAI Extract", "type": "main", "index": 0 }]] },
-    "OpenAI Extract": { "main": [[{ "node": "Parse & Validate", "type": "main", "index": 0 }]] },
-    "Parse & Validate": { "main": [[{ "node": "Check Duplicate (REST)", "type": "main", "index": 0 }]] },
-    "Check Duplicate (REST)": { "main": [[{ "node": "Decide Route", "type": "main", "index": 0 }]] },
-    "Decide Route": {
-      "main": [[
-        { "node": "Filter: Insert", "type": "main", "index": 0 },
-        { "node": "Filter: Duplicate", "type": "main", "index": 0 }
-      ]]
-    },
-    "Filter: Insert": { "main": [[{ "node": "Insert Lead (REST)", "type": "main", "index": 0 }]] },
-    "Insert Lead (REST)": {
-      "main": [[
-        { "node": "Filter: Low Confidence", "type": "main", "index": 0 },
-        { "node": "Filter: Has Draft", "type": "main", "index": 0 }
-      ]]
-    },
-    "Filter: Low Confidence": { "main": [[{ "node": "Log Incomplete (REST)", "type": "main", "index": 0 }]] },
-    "Filter: Has Draft": { "main": [[{ "node": "Build Gmail Draft RFC822", "type": "main", "index": 0 }]] },
-    "Build Gmail Draft RFC822": { "main": [[{ "node": "Create Gmail Draft", "type": "main", "index": 0 }]] },
-    "Filter: Duplicate": { "main": [[{ "node": "Log Duplicate (REST)", "type": "main", "index": 0 }]] }
-  },
-  "settings": { "executionOrder": "v1" },
-  "tags": [{ "name": "novekai" }, { "name": "immo" }]
-}
+    "Gmail Trigger": { "main": [[{ "node": "Filter & Normalize", "type":
