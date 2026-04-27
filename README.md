@@ -264,7 +264,3 @@ Tous les nœuds critiques ont un **retry + error output** branché vers la table
 Pour le filet de sécurité ultime, un workflow séparé **`Error Handler — Novek immo`** (ID `DWWTNDsNPYCztTDb`) capte tous les crashes non gérés via un `Error Trigger` et les log dans `processing_log` avec contexte (workflow, nœud, message d'erreur, exec id). À configurer comme Error Workflow de Novek immo2 dans Settings → Error Workflow.
 
 Le `Decide Route` a aussi des **gardes défensives** : si `prospect_email` est null ou si Supabase REST renvoie un statusCode ≥ 400, on route vers `insert` (mieux un doublon potentiel qu'un lead perdu). Le `Filter: Low Confidence` extrait le `lead_id` de manière défensive (`Array.isArray(body) ? body[0].id : body.id`) pour gérer les variations de réponse PostgREST.
-
-## Limitations connues / améliorations futures
-
-- **Tests automatisés
