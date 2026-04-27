@@ -1,23 +1,36 @@
 {
   "name": "Novek immo2",
-  "_export_note": "Pipeline Gmail Trigger + OpenAI gpt-4o + Supabase REST + brouillon Gmail HTML dans le thread d'origine. Credentials vidés pour ce commit. À l'import : créer Gmail OAuth2 (scope gmail.modify), OpenAI httpHeaderAuth (Authorization: Bearer), Supabase API (host + service_role). Nœuds critiques (OpenAI Extract, Insert Lead, Create Gmail Draft) ont retry + onError:continueErrorOutput vers des Log X Failure (HTTP POST processing_log). Voir aussi workflow/error-handler.json pour le filet de sécurité global.",
+  "_export_note": "Pipeline Gmail Trigger + OpenAI gpt-4o (json_object mode) + Supabase REST + brouillon Gmail HTML dans le thread d'origine. Credentials vidées pour ce commit. À l'import : créer Gmail OAuth2 (scope gmail.modify), OpenAI httpHeaderAuth (Authorization: Bearer sk-...), Supabase API (host + service_role). 22 nodes : 18 du pipeline + 4 error handlers (Log OpenAI/Insert/Draft Failure + Notify Draft Failure). Les 3 nodes critiques (OpenAI Extract, Insert Lead, Create Gmail Draft) ont retry + onError:continueErrorOutput connecté en sortie 'error' (pas main[1]) vers leur Log Failure. Filet ultime : Error Handler global (workflow/error-handler.json) à configurer dans Settings → Error Workflow. Surveillance silence : workflow/heartbeat.json.",
   "nodes": [
     {
       "id": "gmail-trigger",
       "name": "Gmail Trigger",
       "type": "n8n-nodes-base.gmailTrigger",
       "typeVersion": 1.3,
-      "position": [240, 320],
+      "position": [
+        240,
+        320
+      ],
       "parameters": {
-        "pollTimes": { "item": [{ "mode": "everyMinute" }] },
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
         "simple": false,
         "filters": {
           "q": "from:(noreply@immoweb.be OR notifications@immovlan.be OR no-reply@immovlan.be) newer_than:1d",
           "readStatus": "unread"
-        }
+        },
+        "options": {}
       },
       "credentials": {
-        "gmailOAuth2": { "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID", "name": "Gmail account novekai" }
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account novekai"
+        }
       }
     },
     {
@@ -25,11 +38,12 @@
       "name": "Filter & Normalize",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [480, 320],
+      "position": [
+        480,
+        320
+      ],
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "language": "javaScript",
-        "jsCode": "const items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const msg = it.json;\n  const fromAddr = (msg.from?.value?.[0]?.address || msg.from || '').toString();\n  const lower = fromAddr.toLowerCase();\n  if (!lower.includes('immo')) continue;\n  const subject = msg.subject || '(sans objet)';\n  const date = msg.date || new Date().toISOString();\n  const bodyTextRaw = (msg.text || msg.snippet || '').toString();\n  const bodyText = bodyTextRaw\n    .replace(/<[^>]+>/g, '')\n    .replace(/&nbsp;/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/&euro;/g, '€')\n    .replace(/&lt;/g, '<')\n    .replace(/&gt;/g, '>')\n    .replace(/&quot;/g, '\"')\n    .replace(/&#39;/g, \"'\")\n    .replace(/\\s+\\n/g, '\\n')\n    .trim()\n    .slice(0, 10000);\n  const raw_email = 'FROM: ' + fromAddr + '\\nSUBJECT: ' + subject + '\\nDATE: ' + date + '\\n\\n' + bodyText;\n  out.push({ json: { from: fromAddr, subject, received_at: date, body_text: bodyText, raw_email } });\n}\nreturn out;"
+        "jsCode": "const items = $input.all(); const out = [];\nfor (const it of items) {\n  const msg = it.json;\n  const fromAddr = (msg.from?.value?.[0]?.address || msg.from || '').toString();\n  const lower = fromAddr.toLowerCase();\n  if (!lower.includes('immo')) continue;\n  const subject = msg.subject || '(sans objet)';\n  const date = msg.date || new Date().toISOString();\n  const bodyTextRaw = (msg.text || msg.snippet || '').toString();\n  const bodyText = bodyTextRaw.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\\s+\\n/g, '\\n').trim().slice(0, 10000);\n  const raw_email = 'FROM: ' + fromAddr + '\\nSUBJECT: ' + subject + '\\nDATE: ' + date + '\\n\\n' + bodyText;\n  out.push({ json: { from: fromAddr, subject, received_at: date, body_text: bodyText, raw_email } });\n}\nreturn out;"
       }
     },
     {
@@ -37,32 +51,81 @@
       "name": "OpenAI Extract",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
-      "position": [720, 320],
-      "onError": "continueErrorOutput",
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000,
+      "position": [
+        720,
+        320
+      ],
       "parameters": {
         "method": "POST",
         "url": "https://api.openai.com/v1/chat/completions",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
-        "contentType": "json",
         "specifyBody": "json",
         "jsonBody": {
           "model": "gpt-4o",
           "temperature": 0.3,
-          "response_format": { "type": "json_object" },
+          "response_format": {
+            "type": "json_object"
+          },
           "messages": [
-            { "role": "system", "content": "<voir prompts/extraction-system-prompt.md>" },
-            { "role": "user", "content": "=Voici l'email :\n\nFROM: {{ $json.from }}\nSUBJECT: {{ $json.subject }}\nDATE: {{ $json.received_at }}\n\n---\n{{ $json.body_text }}" }
+            {
+              "role": "system",
+              "content": "Tu es un extracteur de donnees ET un redacteur de reponses HTML pour une agence immobiliere belge. Tu recois le texte brut d un email d un portail immobilier. Reponds UNIQUEMENT avec un objet JSON valide, sans texte avant/apres, sans bloc markdown.\n\nSCHEMA: { \"prospect_nom\": string|null, \"prospect_email\": string|null, \"prospect_tel\": string|null, \"bien_reference\": string|null, \"bien_adresse\": string|null, \"type_demande\": \"visite\"|\"info\"|\"candidature\"|\"autre\", \"langue\": \"fr\"|\"nl\"|\"en\", \"message_prospect\": string|null, \"score_confiance\": number, \"draft_reply\": string|null }\n\nREGLES: tous champs presents meme si null, jamais chaine vide, ne devine jamais.\ntype_demande: visite/candidature/info/autre. Priorite candidature > visite > info.\nLANGUE: langue du message prospect.\nSCORE: 0.9-1.0 complet, 0.6-0.8 1-2 manques, 0.3-0.5 ambigu, 0-0.2 tronque.\nNETTOYAGE: tel chiffres seulement (null si tronque), adresse 'Rue numero, CP ville', message sans signature portail, nom 'Prenom Nom'.\n\nDRAFT_REPLY HTML:\n- CSS inline only, max-width 600px, polices systeme, couleurs #2d2d2d/#f97316/#6b7280/#1f2937.\n- Structure div racine avec p paragraphes margin 0 0 16px puis signature avec border-top 2px solid #f97316.\n- Sigs: fr 'L equipe Novekai'+'Agence immobiliere Novekai', nl 'Het Novekai team'+'Vastgoedkantoor Novekai', en 'The Novekai team'+'Novekai Real Estate Agency'.\n- visite: 2 creneaux concrets. candidature: accuse+delai 48-72h. info: generique sans inventer. autre: poli.\n- Apostrophes simples pour CSS. Si score < 0.3, draft_reply = null."
+            },
+            {
+              "role": "user",
+              "content": "=Voici l email :\n\nFROM: {{ $json.from }}\nSUBJECT: {{ $json.subject }}\nDATE: {{ $json.received_at }}\n\n---\n{{ $json.body_text }}"
+            }
           ]
         },
-        "options": { "timeout": 30000 }
+        "options": {
+          "timeout": 30000
+        }
       },
       "credentials": {
-        "httpHeaderAuth": { "id": "REPLACE_WITH_YOUR_OPENAI_CREDENTIAL_ID", "name": "OpenAI API" }
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI HTTP Header Auth"
+        }
+      },
+      "retryOnFail": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "log-openai-failure",
+      "name": "Log OpenAI Failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        720,
+        80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://xxoximcbamzntsvcmrbi.supabase.co/rest/v1/processing_log",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": {
+          "action": "openai_failure",
+          "raw_email": "={{ $('Filter & Normalize').item.json.raw_email }}",
+          "notes": "=OpenAI Extract failed after 3 retries"
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "REPLACE_WITH_YOUR_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Novekai"
+        }
       }
     },
     {
@@ -70,28 +133,67 @@
       "name": "Parse & Validate",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [960, 320],
+      "position": [
+        960,
+        320
+      ],
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "language": "javaScript",
-        "jsCode": "const items = $input.all();\nconst sources = $('Filter & Normalize').all();\nconst out = [];\nconst T = new Set(['visite','info','candidature','autre']);\nconst L = new Set(['fr','nl','en']);\nfunction empty(r){return{prospect_nom:null,prospect_email:null,prospect_tel:null,bien_reference:null,bien_adresse:null,type_demande:'autre',langue:'fr',message_prospect:null,score_confiance:0,draft_reply:null,_err:r};}\nfor (let idx = 0; idx < items.length; idx++) {\n  const i = items[idx];\n  const sourceIdx = i.pairedItem?.item ?? idx;\n  const r = sources[sourceIdx]?.json.raw_email || '';\n  let c = '';\n  try { c = i.json.choices?.[0]?.message?.content || ''; } catch(x){ out.push({json:{...empty('no_content'),raw_email:r}}); continue; }\n  if (!c.trim()) { out.push({json:{...empty('empty'),raw_email:r}}); continue; }\n  let p;\n  try { p = JSON.parse(c.trim().replace(/^```(?:json)?\\s*/i,'').replace(/```$/,'').trim()); } catch(x){ out.push({json:{...empty('parse_err'),raw_email:r}}); continue; }\n  const score = typeof p.score_confiance==='number'?Math.max(0,Math.min(1,p.score_confiance)):0;\n  out.push({json:{prospect_nom:p.prospect_nom||null,prospect_email:p.prospect_email||null,prospect_tel:p.prospect_tel||null,bien_reference:p.bien_reference||null,bien_adresse:p.bien_adresse||null,type_demande:T.has(p.type_demande)?p.type_demande:'autre',langue:L.has(p.langue)?p.langue:'fr',message_prospect:p.message_prospect||null,score_confiance:score,draft_reply: score<0.3 ? null : (p.draft_reply||null),raw_email:r}});\n}\nreturn out;"
+        "jsCode": "const items = $input.all(); const sources = $('Filter & Normalize').all(); const out = []; const T = new Set(['visite','info','candidature','autre']); const L = new Set(['fr','nl','en']);\nfunction empty(r){return{prospect_nom:null,prospect_email:null,prospect_tel:null,bien_reference:null,bien_adresse:null,type_demande:'autre',langue:'fr',message_prospect:null,score_confiance:0,draft_reply:null,_err:r};}\nfor (let idx = 0; idx < items.length; idx++) {\n  const i = items[idx]; const sourceIdx = i.pairedItem?.item ?? idx; const r = sources[sourceIdx]?.json.raw_email || '';\n  let c = '';\n  try { c = i.json.choices?.[0]?.message?.content || ''; } catch(x){ out.push({json:{...empty('no_content'),raw_email:r}}); continue; }\n  if (!c.trim()) { out.push({json:{...empty('empty'),raw_email:r}}); continue; }\n  let p; try { p = JSON.parse(c.trim().replace(/^```(?:json)?\\s*/i,'').replace(/```$/,'').trim()); } catch(x){ out.push({json:{...empty('parse_err'),raw_email:r}}); continue; }\n  const score = typeof p.score_confiance==='number'?Math.max(0,Math.min(1,p.score_confiance)):0;\n  out.push({json:{prospect_nom:p.prospect_nom||null,prospect_email:p.prospect_email||null,prospect_tel:p.prospect_tel||null,bien_reference:p.bien_reference||null,bien_adresse:p.bien_adresse||null,type_demande:T.has(p.type_demande)?p.type_demande:'autre',langue:L.has(p.langue)?p.langue:'fr',message_prospect:p.message_prospect||null,score_confiance:score,draft_reply: score<0.3 ? null : (p.draft_reply||null),raw_email:r}});\n}\nreturn out;"
       }
     },
     {
-      "id": "check-dup",
+      "id": "filter-valid-only",
+      "name": "Filter: Valid Only",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1152,
+        224
+      ],
+      "parameters": {
+        "jsCode": "return $input.all().filter(i => !i.json._err);"
+      }
+    },
+    {
+      "id": "filter-parse-errors",
+      "name": "Filter: Parse Errors",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1136,
+        464
+      ],
+      "parameters": {
+        "jsCode": "return $input.all().filter(i => i.json._err);"
+      }
+    },
+    {
+      "id": "check-duplicate",
       "name": "Check Duplicate (REST)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
-      "position": [1200, 320],
+      "position": [
+        1328,
+        224
+      ],
       "parameters": {
-        "method": "GET",
-        "url": "={{ $credentials.host }}/rest/v1/leads?prospect_email=eq.{{ encodeURIComponent($json.prospect_email || \"\") }}&bien_reference=eq.{{ encodeURIComponent($json.bien_reference || \"\") }}&email_date=eq.{{ $now.toFormat(\"yyyy-MM-dd\") }}&limit=1&select=id",
+        "url": "=https://xxoximcbamzntsvcmrbi.supabase.co/rest/v1/leads?prospect_email=eq.{{ encodeURIComponent($json.prospect_email || \"\") }}&bien_reference=eq.{{ encodeURIComponent($json.bien_reference || \"\") }}&email_date=eq.{{ $now.toFormat(\"yyyy-MM-dd\") }}&limit=1&select=id",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "supabaseApi",
-        "options": { "response": { "response": { "neverError": true, "fullResponse": true } } }
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
       },
       "credentials": {
-        "supabaseApi": { "id": "REPLACE_WITH_YOUR_SUPABASE_CREDENTIAL_ID", "name": "Supabase Novekai" }
+        "supabaseApi": {
+          "id": "REPLACE_WITH_YOUR_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Novekai"
+        }
       }
     },
     {
@@ -99,11 +201,48 @@
       "name": "Decide Route",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1440, 320],
+      "position": [
+        1568,
+        224
+      ],
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "language": "javaScript",
-        "jsCode": "const items = $input.all();\nconst leads = $('Parse & Validate').all();\nconst out = [];\nfor (let idx = 0; idx < items.length; idx++) {\n  const i = items[idx];\n  const sourceIdx = i.pairedItem?.item ?? idx;\n  const lead = leads[sourceIdx]?.json;\n  if (!lead) continue;\n  // Garde 1 : email prospect manquant -> insert quand même (audit) sans dédup\n  if (!lead.prospect_email) {\n    out.push({ json: { ...lead, _action: 'insert', _duplicate_id: null } });\n    continue;\n  }\n  // Garde 2 : Supabase a renvoyé une erreur HTTP -> en cas de doute on insère\n  const statusCode = i.json.statusCode;\n  if (statusCode && statusCode >= 400) {\n    out.push({ json: { ...lead, _action: 'insert', _duplicate_id: null, _check_dup_status: statusCode } });\n    continue;\n  }\n  const body = i.json.body !== undefined ? i.json.body : i.json;\n  const dupArray = Array.isArray(body) ? body : (body && body.id ? [body] : []);\n  const isDuplicate = dupArray.length > 0 && !!dupArray[0].id;\n  out.push({ json: { ...lead, _action: isDuplicate ? 'log_duplicate' : 'insert', _duplicate_id: isDuplicate ? dupArray[0].id : null } });\n}\nreturn out;"
+        "jsCode": "const items = $input.all(); const leads = $('Filter: Valid Only').all(); const out = [];\nfor (let idx = 0; idx < items.length; idx++) {\n  const i = items[idx]; const sourceIdx = i.pairedItem?.item ?? idx; const lead = leads[sourceIdx]?.json;\n  if (!lead) continue;\n  if (!lead.prospect_email) { out.push({ json: { ...lead, _action: 'insert', _duplicate_id: null } }); continue; }\n  const statusCode = i.json.statusCode;\n  if (statusCode && statusCode >= 400) { out.push({ json: { ...lead, _action: 'insert', _duplicate_id: null, _check_dup_status: statusCode } }); continue; }\n  const body = i.json.body !== undefined ? i.json.body : i.json;\n  const dupArray = Array.isArray(body) ? body : (body && body.id ? [body] : []);\n  const isDuplicate = dupArray.length > 0 && !!dupArray[0].id;\n  out.push({ json: { ...lead, _action: isDuplicate ? 'log_duplicate' : 'insert', _duplicate_id: isDuplicate ? dupArray[0].id : null } });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "log-parse-error",
+      "name": "Log Parse Error",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1360,
+        464
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://xxoximcbamzntsvcmrbi.supabase.co/rest/v1/processing_log",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": {
+          "action": "parse_error",
+          "raw_email": "={{ $json.raw_email }}",
+          "notes": "=Parse failed: {{ $json._err }}"
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "REPLACE_WITH_YOUR_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Novekai"
+        }
       }
     },
     {
@@ -111,11 +250,55 @@
       "name": "Filter: Insert",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1680, 220],
+      "position": [
+        1808,
+        128
+      ],
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "language": "javaScript",
         "jsCode": "return $input.all().filter(i => i.json._action === 'insert');"
+      }
+    },
+    {
+      "id": "filter-duplicate",
+      "name": "Filter: Duplicate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1808,
+        432
+      ],
+      "parameters": {
+        "jsCode": "return $input.all().filter(i => i.json._action === 'log_duplicate');"
+      }
+    },
+    {
+      "id": "log-duplicate",
+      "name": "Log Duplicate (REST)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2048,
+        432
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://xxoximcbamzntsvcmrbi.supabase.co/rest/v1/processing_log",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": {
+          "action": "skipped_duplicate",
+          "raw_email": "={{ $json.raw_email }}",
+          "notes": "=Doublon: {{ $json.prospect_email }} / {{ $json.bien_reference }}"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "REPLACE_WITH_YOUR_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Novekai"
+        }
       }
     },
     {
@@ -123,21 +306,25 @@
       "name": "Insert Lead (REST)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
-      "position": [1920, 220],
-      "onError": "continueErrorOutput",
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 3000,
+      "position": [
+        2048,
+        128
+      ],
       "parameters": {
         "method": "POST",
-        "url": "={{ $credentials.host }}/rest/v1/leads",
+        "url": "=https://xxoximcbamzntsvcmrbi.supabase.co/rest/v1/leads",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "supabaseApi",
         "sendHeaders": true,
-        "specifyHeaders": "keypair",
-        "headerParameters": { "parameters": [{ "name": "Prefer", "value": "return=representation" }] },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
         "sendBody": true,
-        "contentType": "json",
         "specifyBody": "json",
         "jsonBody": {
           "prospect_nom": "={{ $json.prospect_nom }}",
@@ -151,22 +338,65 @@
           "score_confiance": "={{ $json.score_confiance }}",
           "draft_reply": "={{ $json.draft_reply }}",
           "raw_email": "={{ $json.raw_email }}"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "REPLACE_WITH_YOUR_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Novekai"
+        }
+      },
+      "retryOnFail": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "log-insert-failure",
+      "name": "Log Insert Failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2048,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://xxoximcbamzntsvcmrbi.supabase.co/rest/v1/processing_log",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": {
+          "action": "insert_failed",
+          "raw_email": "={{ $('Filter: Valid Only').item.json.raw_email }}",
+          "notes": "=Insert Lead failed after 3 retries"
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
         }
       },
       "credentials": {
-        "supabaseApi": { "id": "REPLACE_WITH_YOUR_SUPABASE_CREDENTIAL_ID", "name": "Supabase Novekai" }
+        "supabaseApi": {
+          "id": "REPLACE_WITH_YOUR_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Novekai"
+        }
       }
     },
     {
-      "id": "filter-low",
+      "id": "filter-low-confidence",
       "name": "Filter: Low Confidence",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2160, 120],
+      "position": [
+        2288,
+        32
+      ],
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "language": "javaScript",
-        "jsCode": "const items = $input.all();\nreturn items.filter(i => {\n  const body = i.json.body || i.json;\n  const row = Array.isArray(body) ? body[0] : body;\n  return (row?.score_confiance ?? 1) < 0.3;\n}).map(i => {\n  const body = i.json.body || i.json;\n  const row = Array.isArray(body) ? body[0] : body;\n  return { json: { ...i.json, _lead_id: row?.id || null, _score: row?.score_confiance ?? 0, _raw_email: row?.raw_email || '' } };\n});"
+        "jsCode": "const items = $input.all(); return items.filter(i => { const body = i.json.body || i.json; const row = Array.isArray(body) ? body[0] : body; return (row?.score_confiance ?? 1) < 0.3; }).map(i => { const body = i.json.body || i.json; const row = Array.isArray(body) ? body[0] : body; return { json: { ...i.json, _lead_id: row?.id || null, _score: row?.score_confiance ?? 0, _raw_email: row?.raw_email || '' } }; });"
       }
     },
     {
@@ -174,23 +404,29 @@
       "name": "Log Incomplete (REST)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
-      "position": [2400, 120],
+      "position": [
+        2528,
+        32
+      ],
       "parameters": {
         "method": "POST",
-        "url": "={{ $credentials.host }}/rest/v1/incomplete_leads_log",
+        "url": "=https://xxoximcbamzntsvcmrbi.supabase.co/rest/v1/incomplete_leads_log",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "supabaseApi",
         "sendBody": true,
-        "contentType": "json",
         "specifyBody": "json",
         "jsonBody": {
           "lead_id": "={{ $json._lead_id }}",
           "raw_email": "={{ $json._raw_email }}",
           "score_confiance": "={{ $json._score }}"
-        }
+        },
+        "options": {}
       },
       "credentials": {
-        "supabaseApi": { "id": "REPLACE_WITH_YOUR_SUPABASE_CREDENTIAL_ID", "name": "Supabase Novekai" }
+        "supabaseApi": {
+          "id": "REPLACE_WITH_YOUR_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Novekai"
+        }
       }
     },
     {
@@ -198,23 +434,25 @@
       "name": "Filter: Has Draft",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2160, 320],
+      "position": [
+        2288,
+        224
+      ],
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "language": "javaScript",
-        "jsCode": "const items = $input.all();\nconst leads = $('Parse & Validate').all();\nconst out = [];\nfor (let idx = 0; idx < items.length; idx++) {\n  const i = items[idx];\n  const sourceIdx = i.pairedItem?.item ?? idx;\n  const lead = leads[sourceIdx]?.json;\n  if (!lead || !lead.draft_reply || !lead.prospect_email) continue;\n  out.push(i);\n}\nreturn out;"
+        "jsCode": "const items = $input.all(); const leads = $('Filter: Valid Only').all(); const out = [];\nfor (let idx = 0; idx < items.length; idx++) { const i = items[idx]; const sourceIdx = i.pairedItem?.item ?? idx; const lead = leads[sourceIdx]?.json; if (!lead || !lead.draft_reply || !lead.prospect_email) continue; out.push(i); }\nreturn out;"
       }
     },
     {
-      "id": "build-rfc822",
+      "id": "build-draft-rfc822",
       "name": "Build Gmail Draft RFC822",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2400, 320],
+      "position": [
+        2528,
+        224
+      ],
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "language": "javaScript",
-        "jsCode": "const items = $input.all();\nconst leads = $('Parse & Validate').all();\nconst triggers = $('Gmail Trigger').all();\nconst out = [];\nfor (let idx = 0; idx < items.length; idx++) {\n  const i = items[idx];\n  const sourceIdx = i.pairedItem?.item ?? idx;\n  const lead = leads[sourceIdx]?.json;\n  const trigger = triggers[sourceIdx]?.json;\n  if (!lead || !trigger) continue;\n  const to = lead.prospect_email;\n  const draft = lead.draft_reply;\n  const origSubj = (trigger.subject || '').toString();\n  const subject = /^re:/i.test(origSubj) ? origSubj : 'Re: ' + origSubj;\n  const messageId = trigger.messageId || trigger.id || '';\n  const inReplyHeader = messageId ? ('In-Reply-To: ' + messageId + '\\r\\nReferences: ' + messageId + '\\r\\n') : '';\n  const rfc822 = 'To: ' + to + '\\r\\n' + 'Subject: ' + subject + '\\r\\n' + inReplyHeader + 'Content-Type: text/html; charset=\"UTF-8\"\\r\\nMIME-Version: 1.0\\r\\n\\r\\n' + draft;\n  const raw = Buffer.from(rfc822, 'utf-8').toString('base64').replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');\n  out.push({ json: { raw, threadId: trigger.threadId, _to: to, _subject: subject } });\n}\nreturn out;"
+        "jsCode": "const items = $input.all(); const leads = $('Filter: Valid Only').all(); const triggers = $('Gmail Trigger').all(); const out = [];\nfor (let idx = 0; idx < items.length; idx++) {\n  const i = items[idx]; const sourceIdx = i.pairedItem?.item ?? idx; const lead = leads[sourceIdx]?.json; const trigger = triggers[sourceIdx]?.json;\n  if (!lead || !trigger) continue;\n  const to = lead.prospect_email; const draft = lead.draft_reply;\n  const origSubj = (trigger.subject || '').toString();\n  const subject = /^re:/i.test(origSubj) ? origSubj : 'Re: ' + origSubj;\n  const messageId = trigger.messageId || trigger.id || '';\n  const inReplyHeader = messageId ? ('In-Reply-To: ' + messageId + '\\r\\nReferences: ' + messageId + '\\r\\n') : '';\n  const rfc822 = 'To: ' + to + '\\r\\n' + 'Subject: ' + subject + '\\r\\n' + inReplyHeader + 'Content-Type: text/html; charset=\"UTF-8\"\\r\\nMIME-Version: 1.0\\r\\n\\r\\n' + draft;\n  const raw = Buffer.from(rfc822, 'utf-8').toString('base64').replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');\n  out.push({ json: { raw, threadId: trigger.threadId, _to: to, _subject: subject } });\n}\nreturn out;"
       }
     },
     {
@@ -222,18 +460,16 @@
       "name": "Create Gmail Draft",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.4,
-      "position": [2640, 320],
-      "onError": "continueErrorOutput",
-      "retryOnFail": true,
-      "maxTries": 2,
-      "waitBetweenTries": 5000,
+      "position": [
+        2768,
+        224
+      ],
       "parameters": {
         "method": "POST",
         "url": "https://gmail.googleapis.com/gmail/v1/users/me/drafts",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "gmailOAuth2",
         "sendBody": true,
-        "contentType": "json",
         "specifyBody": "json",
         "jsonBody": {
           "message": {
@@ -241,48 +477,301 @@
             "raw": "={{ $json.raw }}"
           }
         },
-        "options": { "timeout": 30000 }
-      },
-      "credentials": {
-        "gmailOAuth2": { "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID", "name": "Gmail account novekai" }
-      }
-    },
-    {
-      "id": "filter-dup",
-      "name": "Filter: Duplicate",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1680, 520],
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "language": "javaScript",
-        "jsCode": "return $input.all().filter(i => i.json._action === 'log_duplicate');"
-      }
-    },
-    {
-      "id": "log-duplicate",
-      "name": "Log Duplicate (REST)",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.4,
-      "position": [1920, 520],
-      "parameters": {
-        "method": "POST",
-        "url": "={{ $credentials.host }}/rest/v1/processing_log",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "supabaseApi",
-        "sendBody": true,
-        "contentType": "json",
-        "specifyBody": "json",
-        "jsonBody": {
-          "action": "skipped_duplicate",
-          "raw_email": "={{ $json.raw_email }}",
-          "notes": "=Doublon: {{ $json.prospect_email }} / {{ $json.bien_reference }} (existing id={{ $json._duplicate_id }})"
+        "options": {
+          "timeout": 30000
         }
       },
       "credentials": {
-        "supabaseApi": { "id": "REPLACE_WITH_YOUR_SUPABASE_CREDENTIAL_ID", "name": "Supabase Novekai" }
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account novekai"
+        }
+      },
+      "retryOnFail": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "log-draft-failure",
+      "name": "Log Draft Failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2768,
+        80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://xxoximcbamzntsvcmrbi.supabase.co/rest/v1/processing_log",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": {
+          "action": "draft_failed",
+          "raw_email": "={{ $('Filter & Normalize').item.json.raw_email }}",
+          "notes": "=Draft Gmail rate apres 2 retries pour {{ $('Build Gmail Draft RFC822').item.json._to }}"
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "REPLACE_WITH_YOUR_SUPABASE_CREDENTIAL_ID",
+          "name": "Supabase Novekai"
+        }
+      }
+    },
+    {
+      "id": "notify-draft-failure",
+      "name": "Notify Draft Failure",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2960,
+        80
+      ],
+      "parameters": {
+        "sendTo": "novekai.team@gmail.com",
+        "subject": "=[ALERTE] Brouillon Gmail rate pour {{ $('Build Gmail Draft RFC822').item.json._to }}",
+        "emailType": "text",
+        "message": "=Le brouillon Gmail n a pas pu etre cree apres 2 retries.\n\nProspect: {{ $('Build Gmail Draft RFC822').item.json._to }}\nSujet: {{ $('Build Gmail Draft RFC822').item.json._subject }}\n\nUn lead est dans la base mais sans brouillon prepare. A traiter manuellement.",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account novekai"
+        }
       }
     }
   ],
   "connections": {
-    "Gmail Trigger": { "main": [[{ "node": "Filter & Normalize", "type":
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Filter & Normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter & Normalize": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Extract",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Extract": {
+      "main": [
+        [
+          {
+            "node": "Parse & Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "Log OpenAI Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Validate": {
+      "main": [
+        [
+          {
+            "node": "Filter: Valid Only",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Filter: Parse Errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter: Valid Only": {
+      "main": [
+        [
+          {
+            "node": "Check Duplicate (REST)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter: Parse Errors": {
+      "main": [
+        [
+          {
+            "node": "Log Parse Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Duplicate (REST)": {
+      "main": [
+        [
+          {
+            "node": "Decide Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide Route": {
+      "main": [
+        [
+          {
+            "node": "Filter: Insert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Filter: Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter: Insert": {
+      "main": [
+        [
+          {
+            "node": "Insert Lead (REST)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter: Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Log Duplicate (REST)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Lead (REST)": {
+      "main": [
+        [
+          {
+            "node": "Filter: Has Draft",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Filter: Low Confidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "Log Insert Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter: Low Confidence": {
+      "main": [
+        [
+          {
+            "node": "Log Incomplete (REST)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter: Has Draft": {
+      "main": [
+        [
+          {
+            "node": "Build Gmail Draft RFC822",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Gmail Draft RFC822": {
+      "main": [
+        [
+          {
+            "node": "Create Gmail Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Gmail Draft": {
+      "error": [
+        [
+          {
+            "node": "Log Draft Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Draft Failure": {
+      "main": [
+        [
+          {
+            "node": "Notify Draft Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "novekai"
+    },
+    {
+      "name": "immo"
+    }
+  ]
+}

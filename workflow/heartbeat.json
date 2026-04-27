@@ -1,0 +1,157 @@
+{
+  "name": "Heartbeat Novek immo",
+  "_export_note": "Workflow heartbeat indépendant. Schedule Trigger toutes les 6h, interroge l'API n8n pour la dernière exécution réussie de Novek immo2 (id 3DmtD9kupJm7HqCc), et envoie une alerte email à novekai.team si silence > 2h. À l'import : créer credential 'n8n API' (httpHeaderAuth, name=X-N8N-API-KEY, value=ta clé API n8n) et Gmail OAuth2.",
+  "nodes": [
+    {
+      "id": "schedule-6h",
+      "name": "Every 6h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        240,
+        304
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "fetch-last-exec",
+      "name": "Fetch Last Exec",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        480,
+        304
+      ],
+      "parameters": {
+        "url": "https://n8n-u2h7.n8n.novekai.agency/api/v1/executions?workflowId=3DmtD9kupJm7HqCc&limit=1&status=success",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_N8N_API_CREDENTIAL_ID",
+          "name": "n8n API"
+        }
+      }
+    },
+    {
+      "id": "check-freshness",
+      "name": "Check Freshness",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        304
+      ],
+      "parameters": {
+        "jsCode": "const i = $input.first().json;\nconst data = i.data || [];\nconst last = data[0];\nconst now = new Date();\nif (!last) return [{ json: { alert: true, reason: 'no_exec', hours_since: 999 } }];\nconst lastRun = new Date(last.startedAt || 0);\nconst h = (now - lastRun) / 3600000;\nreturn [{ json: { alert: h > 2, reason: h > 2 ? 'stale' : 'ok', hours_since: parseFloat(h.toFixed(1)) } }];"
+      }
+    },
+    {
+      "id": "filter-alert-needed",
+      "name": "Filter Alert Needed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        304
+      ],
+      "parameters": {
+        "jsCode": "return $input.all().filter(i => i.json.alert === true);"
+      }
+    },
+    {
+      "id": "send-heartbeat-alert",
+      "name": "Send Heartbeat Alert",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1200,
+        304
+      ],
+      "parameters": {
+        "sendTo": "novekai.team@gmail.com",
+        "subject": "ALERTE Novek immo2 polling KO",
+        "emailType": "text",
+        "message": "Novek immo2 silencieux depuis plus de 2h. Verifier OAuth Gmail et logs n8n.",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account novekai"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 6h": {
+      "main": [
+        [
+          {
+            "node": "Fetch Last Exec",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Last Exec": {
+      "main": [
+        [
+          {
+            "node": "Check Freshness",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Freshness": {
+      "main": [
+        [
+          {
+            "node": "Filter Alert Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Alert Needed": {
+      "main": [
+        [
+          {
+            "node": "Send Heartbeat Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "novekai"
+    },
+    {
+      "name": "immo"
+    },
+    {
+      "name": "heartbeat"
+    }
+  ]
+}
